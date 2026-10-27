@@ -1,0 +1,354 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node.js — Desafio do Event Loop</title>
+<style>
+:root {
+  --bg: #080d1b;
+  --panel: #111a30;
+  --cyan: #42f5e9;
+  --pink: #ff4fa3;
+  --green: #77ff9a;
+  --yellow: #ffda6b;
+  --text: #edf4ff;
+  --muted: #9aabc9;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at top, #162747, var(--bg) 70%);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  padding: 20px;
+}
+main { max-width: 950px; margin: auto; }
+header { text-align: center; margin-bottom: 20px; }
+h1 {
+  font-size: clamp(1.7rem, 5vw, 3rem);
+  margin: 0;
+  color: var(--cyan);
+  text-shadow: 0 0 20px #42f5e955;
+}
+.subtitle { color: var(--muted); margin-top: 8px; }
+.hud {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stat, .panel {
+  background: #111a30eF;
+  border: 1px solid #314362;
+  border-radius: 14px;
+  padding: 14px;
+}
+.stat { text-align: center; }
+.stat small { display: block; color: var(--muted); }
+.stat strong { font-size: 1.45rem; }
+#score { color: var(--cyan); }
+#lives { color: var(--pink); }
+#timer { color: var(--yellow); }
+#level { color: var(--green); }
+.panel { margin-bottom: 14px; }
+h2 { font-size: 1.1rem; margin: 0 0 10px; }
+p { line-height: 1.55; }
+.muted { color: var(--muted); font-size: .9rem; }
+.progress {
+  height: 8px; background: #25324b;
+  border-radius: 20px; overflow: hidden; margin-top: 12px;
+}
+#progressBar {
+  width: 100%; height: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--pink));
+  transition: width .3s;
+}
+#requestArea {
+  min-height: 125px;
+  display: flex; align-items: center; justify-content: center;
+  flex-wrap: wrap; gap: 12px;
+}
+.request {
+  width: min(100%, 320px);
+  border: 1px solid var(--cyan);
+  border-radius: 12px;
+  background: #10233a;
+  padding: 16px;
+  text-align: center;
+  animation: appear .25s ease-out;
+}
+.request .method { color: var(--green); font-weight: 800; }
+.request .path { font-size: 1.3rem; font-weight: 800; margin: 7px 0; }
+.request .type { color: var(--muted); font-size: .85rem; }
+@keyframes appear {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+button {
+  border: 1px solid #405473;
+  border-radius: 10px;
+  padding: 13px 10px;
+  font: inherit;
+  font-weight: 750;
+  color: var(--text);
+  background: #1b2943;
+  cursor: pointer;
+  transition: .15s;
+}
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: var(--cyan);
+  background: #243957;
+}
+button:focus-visible { outline: 3px solid var(--yellow); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button span { display: block; font-size: .8rem; font-weight: 400; margin-top: 5px; }
+.primary { background: #087c80; border-color: var(--cyan); }
+.queue {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.lane { background: #0a1224; padding: 12px; border-radius: 10px; }
+.lane h3 { font-size: .85rem; color: var(--cyan); margin: 0 0 7px; }
+.lane p { font-size: .83rem; margin: 0; color: var(--muted); }
+#feedback { min-height: 26px; font-weight: 650; }
+.good { color: var(--green); }
+.bad { color: var(--pink); }
+.overlay {
+  text-align: center; padding: 20px 5px;
+}
+.overlay h2 { color: var(--cyan); font-size: 1.5rem; }
+.hidden { display: none !important; }
+footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 10px; }
+@media(max-width: 560px) {
+  body { padding: 12px; }
+  .hud { grid-template-columns: repeat(2, 1fr); }
+  .queue { grid-template-columns: 1fr; }
+  .actions { grid-template-columns: 1fr 1fr; }
+  button { padding: 12px 6px; font-size: .9rem; }
+}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>⬡ NODE.JS: EVENT LOOP</h1>
+  <div class="subtitle">Desafio de Back-End • Proteja o servidor!</div>
+</header>
+
+<section class="hud">
+  <div class="stat"><small>SCORE</small><strong id="score">0</strong></div>
+  <div class="stat"><small>VIDAS</small><strong id="lives">❤️❤️❤️</strong></div>
+  <div class="stat"><small>TEMPO</small><strong id="timer">60s</strong></div>
+  <div class="stat"><small>NÍVEL</small><strong id="level">1</strong></div>
+</section>
+
+<section class="panel">
+  <h2>📡 Requisição recebida</h2>
+  <p class="muted">Identifique a tarefa e escolha o destino correto antes que o tempo acabe.</p>
+  <div id="requestArea">
+    <div class="overlay">
+      <h2>Servidor aguardando conexão...</h2>
+      <p>Você é responsável por encaminhar cada requisição.</p>
+      <button class="primary" id="startBtn">▶ INICIAR MISSÃO</button>
+    </div>
+  </div>
+  <div class="progress"><div id="progressBar"></div></div>
+</section>
+
+<section class="panel">
+  <h2>🧠 Escolha o destino correto</h2>
+  <div class="actions">
+    <button data-answer="stack">⚡ CALL STACK<span>Código síncrono</span></button>
+    <button data-answer="async">🔧 WEB APIs / I/O<span>Timer, arquivo, rede</span></button>
+    <button data-answer="queue">📥 CALLBACK QUEUE<span>Callback pronto aguardando</span></button>
+    <button data-answer="loop">🔄 EVENT LOOP<span>Libera a próxima tarefa</span></button>
+  </div>
+  <p id="feedback" aria-live="polite">Pressione Iniciar para jogar.</p>
+</section>
+
+<section class="panel">
+  <h2>🖥️ Painel do servidor</h2>
+  <div class="queue">
+    <div class="lane"><h3>CALL STACK</h3><p id="stackInfo">Aguardando código...</p></div>
+    <div class="lane"><h3>WEB APIs / I/O</h3><p id="asyncInfo">Sem tarefas pendentes.</p></div>
+    <div class="lane"><h3>CALLBACK QUEUE</h3><p id="queueInfo">Fila vazia.</p></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>📚 Aprenda enquanto joga</h2>
+  <p class="muted">
+    <b>Call Stack:</b> executa funções JavaScript, uma por vez.
+    <b>Web APIs / I/O:</b> timers e operações assíncronas podem avançar sem bloquear
+    a thread principal. <b>Callback Queue:</b> callbacks prontos aguardam sua vez.
+    <b>Event Loop:</b> verifica quando a Call Stack está livre e permite que callbacks
+    elegíveis sejam executados. No Node.js, o loop também coordena fases de callbacks
+    e operações de I/O.
+  </p>
+  <p class="muted">Atenção: esta é uma simulação didática simplificada, não uma reprodução exata do runtime do Node.js.</p>
+</section>
+
+<section class="panel overlay hidden" id="endPanel">
+  <h2 id="endTitle">Missão encerrada</h2>
+  <p id="endText"></p>
+  <button class="primary" id="restartBtn">↻ JOGAR NOVAMENTE</button>
+</section>
+
+<footer>BACK-END 1 • Aprenda lógica de sistemas com Node.js</footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+const tasks = [
+  { method:"GET", path:"/home", label:"Executar console.log()", answer:"stack",
+    explain:"Correto! Código síncrono entra na Call Stack." },
+  { method:"ASYNC", path:"setTimeout()", label:"Timer iniciado", answer:"async",
+    explain:"Correto! O timer é aguardado fora da execução síncrona imediata." },
+  { method:"I/O", path:"readFile()", label:"Leitura de arquivo", answer:"async",
+    explain:"Correto! A leitura assíncrona pode aguardar o sistema de I/O." },
+  { method:"CALLBACK", path:"onComplete()", label:"Callback pronto", answer:"queue",
+    explain:"Correto! Na simulação, o callback pronto aguarda na fila." },
+  { method:"EVENT", path:"loop()", label:"Stack está livre", answer:"loop",
+    explain:"Correto! O Event Loop permite avançar quando as condições de execução são atendidas." },
+  { method:"JS", path:"JSON.parse()", label:"Processamento síncrono", answer:"stack",
+    explain:"Correto! JSON.parse() executa sincronamente e usa a thread JavaScript." },
+  { method:"HTTP", path:"fetch / resposta", label:"Operação de rede", answer:"async",
+    explain:"Correto! A espera por rede pode ocorrer sem bloquear a thread JavaScript." },
+  { method:"CALLBACK", path:"onData()", label:"Callback disponível", answer:"queue",
+    explain:"Correto! Um callback pronto aguarda para ser executado." }
+];
+
+let score = 0, lives = 3, time = 60, level = 1;
+let current = null, active = false, tick = null, spawn = null;
+let answered = false, busy = false;
+let asyncCount = 0, queueCount = 0;
+
+function renderHUD() {
+  $("score").textContent = score;
+  $("lives").textContent = "❤️".repeat(lives) + "🖤".repeat(3-lives);
+  $("timer").textContent = time + "s";
+  $("level").textContent = level;
+  $("progressBar").style.width = (time / 60 * 100) + "%";
+}
+
+function updateLanes() {
+  $("stackInfo").textContent = busy ? "Executando tarefa..." : "Livre para executar.";
+  $("asyncInfo").textContent = asyncCount ? asyncCount + " operação(ões) em andamento." : "Sem tarefas pendentes.";
+  $("queueInfo").textContent = queueCount ? queueCount + " callback(s) aguardando." : "Fila vazia.";
+}
+
+function nextTask() {
+  if (!active) return;
+  current = tasks[Math.floor(Math.random() * tasks.length)];
+  answered = false;
+  $("requestArea").innerHTML = `
+    <div class="request">
+      <div class="method">${current.method}</div>
+      <div class="path">${current.path}</div>
+      <div class="type">${current.label}</div>
+    </div>`;
+  $("feedback").textContent = "Para onde esta tarefa deve ir?";
+  $("feedback").className = "";
+  updateLanes();
+}
+
+function answer(destination) {
+  if (!active || !current || answered) return;
+  answered = true;
+
+  if (destination === current.answer) {
+    score += 10;
+    $("feedback").textContent = "✅ " + current.explain;
+    $("feedback").className = "good";
+
+    if (current.answer === "async") asyncCount++;
+    if (current.answer === "queue") {
+      queueCount++;
+      if (asyncCount > 0) asyncCount--;
+    }
+    if (current.answer === "loop") {
+      if (queueCount > 0) queueCount--;
+      busy = true;
+      updateLanes();
+      setTimeout(() => { busy = false; updateLanes(); }, 300);
+    }
+    if (score >= level * 50) level++;
+  } else {
+    lives--;
+    $("feedback").textContent = "❌ Destino incorreto! Revise os conceitos no painel.";
+    $("feedback").className = "bad";
+  }
+
+  renderHUD();
+  updateLanes();
+
+  if (lives <= 0) {
+    endGame(false);
+    return;
+  }
+  setTimeout(() => { if (active) nextTask(); }, 650);
+}
+
+function startGame() {
+  clearInterval(tick);
+  clearInterval(spawn);
+  score = 0; lives = 3; time = 60; level = 1;
+  asyncCount = 0; queueCount = 0; busy = false;
+  active = true; current = null;
+  $("endPanel").classList.add("hidden");
+  document.querySelectorAll("[data-answer]").forEach(b => b.disabled = false);
+  renderHUD();
+  nextTask();
+
+  tick = setInterval(() => {
+    if (!active) return;
+    time--;
+    renderHUD();
+    if (time <= 0) endGame(true);
+  }, 1000);
+
+  spawn = setInterval(() => {
+    if (!active) return;
+    if (!answered) {
+      lives--;
+      $("feedback").textContent = "⏱️ Requisição não processada a tempo!";
+      $("feedback").className = "bad";
+      renderHUD();
+      if (lives <= 0) { endGame(false); return; }
+      nextTask();
+    }
+  }, 4500);
+}
+
+function endGame(timeOver) {
+  active = false;
+  clearInterval(tick);
+  clearInterval(spawn);
+  $("endPanel").classList.remove("hidden");
+  $("endTitle").textContent = score >= 150 ? "🏆 SERVIDOR MASTER!" : "🛑 GAME OVER";
+  $("endText").textContent = `${timeOver ? "Tempo esgotado" : "Suas vidas acabaram"}! Pontuação: ${score}. ${score >= 150 ? "Excelente domínio do Event Loop!" : "Treine mais e tente superar sua pontuação."}`;
+  $("requestArea").innerHTML = '<div class="overlay"><h2>Conexão encerrada</h2><p>Inicie uma nova missão para continuar.</p></div>';
+  document.querySelectorAll("[data-answer]").forEach(b => b.disabled = true);
+}
+
+$("startBtn").addEventListener("click", startGame);
+$("restartBtn").addEventListener("click", startGame);
+document.querySelectorAll("[data-answer]").forEach(button => {
+  button.addEventListener("click", () => answer(button.dataset.answer));
+});
+renderHUD();
+updateLanes();
+</script>
+</body>
+</html>
